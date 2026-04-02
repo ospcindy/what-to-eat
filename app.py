@@ -4,9 +4,23 @@ import time
 # import io
 
 from pathlib import Path
+from lib import db
 
 st.markdown("""
-<h1 style='text-align:center; font-size:48px; margin-bottom:8px;'>今天吃什麼</h1>
+<link href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC&display=swap" rel="stylesheet">
+<style>
+html, body, [class*="css"], .stMarkdown, .stTextInput, .stButton, .stCaption, p, div, span, input, button, label {
+    font-family: 'LXGW WenKai TC', sans-serif !important;
+}
+/* 壓掉 label_visibility=hidden 留下的空白 */
+div[data-testid="stTextInput"] label[data-testid="stWidgetLabel"] {
+    display: none !important;
+}
+div[data-testid="stTextInput"] {
+    margin-top: 0 !important;
+}
+</style>
+<h1 style='text-align:center; font-size:48px; margin-bottom:8px; font-family:"LXGW WenKai TC",sans-serif;'>今天吃什麼</h1>
 """, unsafe_allow_html=True)
 
 # 初始化 session state
@@ -18,6 +32,12 @@ if "last_choice" not in st.session_state:
     st.session_state.last_choice = ""
 if "reject_count" not in st.session_state:
     st.session_state.reject_count = 0
+if "del_generation" not in st.session_state:
+    st.session_state.del_generation = 0
+# 初始化資料庫並載入已存的餐廳
+db.init_db()
+if not st.session_state.restaurants:
+    st.session_state.restaurants = db.get_restaurants()
 # if "input_counter" not in st.session_state:
 #     st.session_state.input_counter = 0
 
@@ -62,10 +82,10 @@ with col_left:
             
             if st.session_state.last_choice:
                 if st.session_state.last_choice == "吃土啦":
-                    # 特殊顯示：只有「吃土啦」三個大字，沒有按鈕
+                    # 特殊顯示：只有「吃土啦」三個大字，改用柔和背景並移除外框
                     text_area.markdown(
-                        "<div style='background:#fff0f0; padding:20px; border-radius:10px; margin-top:12px; border: 1px solid #ffcccc; text-align:center; font-size:28px; font-weight:bold; color:#ff4b4b;'>吃土啦</div>",
-                        unsafe_allow_html=True
+                        "<div style='background:#fff6f6; padding:12px; border-radius:10px; margin-top:12px; text-align:center; font-size:28px; font-weight:bold; color:#ff4b4b;'>吃土啦</div>",
+                        unsafe_allow_html=True,
                     )
                 else:
                     # 正常顯示：有對齊好的「吃...好嗎？」與「不要」按鈕
@@ -114,32 +134,58 @@ with col_right:
     def add_restaurant():
         name = st.session_state.restaurant_input
         if name:
-            if name not in st.session_state.restaurants:
-                st.session_state.restaurants.append(name)
+            # 儲存到 SQLite，若成功則重新載入列表並清空輸入框
+            added = db.add_restaurant(name)
+            if added:
+                st.session_state.restaurants = db.get_restaurants()
                 st.session_state.restaurant_input = ""  # callback 裡可以直接清空
             else:
                 st.warning("重複了啦!!!")
 
-    st.text_input("餐廳名稱", key="restaurant_input")
+    st.markdown("<p style='font-size:1.2rem;margin-bottom:2px;margin-top:0;'>餐廳名稱</p>", unsafe_allow_html=True)
+    st.text_input("", key="restaurant_input", label_visibility="hidden")
     st.button("加入", on_click=add_restaurant)
 
-    st.write("目前餐廳清單：")
+    st.markdown(
+        "<p style='margin-bottom:4px;font-size:14px;'>目前餐廳清單：</p>",
+        unsafe_allow_html=True,
+    )
     if st.session_state.restaurants:
-        # 使用自定義 CSS 讓清單漂亮一點
-        st.markdown("""
-        <style>
-        .restaurant-item {
-            background-color: #f0f2f6;
-            padding: 8px 12px;
-            border-radius: 8px;
-            margin-bottom: 6px;
-            border-left: 4px solid #4CAF50;
-            font-size: 14px;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        # CSS: make the delete button look like a clean icon (no box, no border)
+        st.markdown(
+            """
+            <style>
+            /* 只鎖定 col_right 內的巢狀 row 最後一欄的按鈕（刪除鈕），不影響「加入」 */
+            div[data-testid="stColumn"] div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"]:last-child button {
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+                color: #bbb !important;
+                padding: 10px 6px 6px 0px !important;
+                min-height: 0 !important;
+                font-size: 20px !important;
+                line-height: 1 !important;
+                border-radius: 4px !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         for idx, r in enumerate(st.session_state.restaurants, 1):
-            st.markdown(f"<div class='restaurant-item'>{idx}. {r}</div>", unsafe_allow_html=True)
+            item_col, btn_col = st.columns([1, 0.12])
+            with item_col:
+                st.markdown(
+                    f"<div style='background:#f0f2f6;padding:8px 12px;border-radius:8px;"
+                    f"border-left:4px solid #4CAF50;font-size:14px;line-height:1.4;'>"
+                    f"{idx}. {r}</div>",
+                    unsafe_allow_html=True,
+                )
+            with btn_col:
+                if st.button("❌", key=f"del_{st.session_state.del_generation}_{idx}"):
+                    db.remove_restaurant(r)
+                    st.session_state.restaurants = db.get_restaurants()
+                    st.session_state.del_generation += 1
+                    st.rerun()
     else:
         st.caption("還沒有餐廳喔～")
 
