@@ -9,7 +9,7 @@ from contextlib import contextmanager
 DB_FILENAME = "what_to_eat.db"
 
 
-def get_user_data_dir(app_name: str = "lunch-picker") -> Path:
+def get_user_data_dir(app_name: str = "what-to-eat") -> Path:
     """Return a suitable per-user data directory for the current platform.
 
     - Windows: %LOCALAPPDATA%\<app_name>
