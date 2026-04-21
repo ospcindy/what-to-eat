@@ -41,6 +41,8 @@ if "del_generation" not in st.session_state:
     st.session_state.del_generation = 0
 if "prefetched_roast" not in st.session_state:
     st.session_state.prefetched_roast = ""
+if "pool_exhausted" not in st.session_state:
+    st.session_state.pool_exhausted = False
 # 初始化資料庫並載入已存的餐廳
 db.init_db()
 if not st.session_state.restaurants:
@@ -61,6 +63,7 @@ with col_left:
                 st.session_state.reject_count = 0  # 正常點擊抽選時重置拒絕計數
                 st.session_state.prefetched_roast = ""  # 重置預取嘴砲
                 st.session_state.filtered_pool = list(st.session_state.restaurants)  # 重置篩選池
+                st.session_state.pool_exhausted = False  # 重置空池子標記
                 st.session_state.animating = True
 
     image_area = st.empty()
@@ -88,7 +91,12 @@ with col_left:
         else:
             image_area.image("assets/lot.png", width=640)
         
-        if st.session_state.last_choice:
+        if st.session_state.pool_exhausted:
+            text_area.markdown(
+                "<div style='background:#fff3cd; padding:16px; border-radius:10px; margin-top:12px; text-align:center; font-size:22px; font-weight:bold; color:#856404;'>篩選後沒有餐廳了！</div>",
+                unsafe_allow_html=True,
+            )
+        elif st.session_state.last_choice:
             if st.session_state.reject_count >= 3:
                 # AI 嘴砲顯示：拒絕 3 次後，顯示 AI 產生的嘴砲
                 roast = st.session_state.prefetched_roast or get_roast(st.session_state.reject_count)
@@ -119,8 +127,16 @@ with col_left:
                     btn1, btn2, btn3, spacer = st.columns([1, 1, 1, 3])
                     with btn1:
                         if st.button("不要", key=f"reject_btn_{rc}", type="tertiary"):
+                            # 從篩選池移除剛才選的選項，避免重複抽到
+                            st.session_state.filtered_pool = [
+                                r for r in st.session_state.filtered_pool
+                                if r["name"] != choice["name"]
+                            ]
                             st.session_state.reject_count += 1
-                            if st.session_state.reject_count < 3:
+                            if not st.session_state.filtered_pool:
+                                st.session_state.last_choice = None
+                                st.session_state.pool_exhausted = True
+                            elif st.session_state.reject_count < 3:
                                 st.session_state.animating = True
                             st.rerun()
                     with btn2:
@@ -131,10 +147,11 @@ with col_left:
                                 if r.get("distance") is None or r["distance"] < threshold
                             ]
                             st.session_state.reject_count += 1
-                            if st.session_state.filtered_pool and st.session_state.reject_count < 3:
+                            if not st.session_state.filtered_pool:
+                                st.session_state.last_choice = None
+                                st.session_state.pool_exhausted = True
+                            elif st.session_state.reject_count < 3:
                                 st.session_state.animating = True
-                            elif not st.session_state.filtered_pool:
-                                st.warning("篩選後沒有餐廳了！")
                             st.rerun()
                     with btn3:
                         if st.button("太貴", key=f"too_exp_{rc}", disabled=not can_filter_price, type="tertiary"):
@@ -144,10 +161,11 @@ with col_left:
                                 if r.get("price") is None or r["price"] < threshold
                             ]
                             st.session_state.reject_count += 1
-                            if st.session_state.filtered_pool and st.session_state.reject_count < 3:
+                            if not st.session_state.filtered_pool:
+                                st.session_state.last_choice = None
+                                st.session_state.pool_exhausted = True
+                            elif st.session_state.reject_count < 3:
                                 st.session_state.animating = True
-                            elif not st.session_state.filtered_pool:
-                                st.warning("篩選後沒有餐廳了！")
                             st.rerun()
 
 with col_right:
