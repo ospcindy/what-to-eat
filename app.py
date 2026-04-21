@@ -21,13 +21,7 @@ st.markdown("""
 html, body, [class*="css"], .stMarkdown, .stTextInput, .stButton, .stCaption, p, div, span, input, button, label {
     font-family: 'LXGW WenKai TC', sans-serif !important;
 }
-/* 壓掉 label_visibility=hidden 留下的空白 */
-div[data-testid="stTextInput"] label[data-testid="stWidgetLabel"] {
-    display: none !important;
-}
-div[data-testid="stTextInput"] {
-    margin-top: 0 !important;
-}
+/* 壓掉 label_visibility=collapsed 留下的空白 */
 </style>
 <h1 style='text-align:center; font-size:48px; margin-bottom:8px; font-family:"LXGW WenKai TC",sans-serif;'>今天吃什麼</h1>
 """, unsafe_allow_html=True)
@@ -38,7 +32,9 @@ if "restaurants" not in st.session_state:
 if "animating" not in st.session_state:
     st.session_state.animating = False
 if "last_choice" not in st.session_state:
-    st.session_state.last_choice = ""
+    st.session_state.last_choice = None
+if "filtered_pool" not in st.session_state:
+    st.session_state.filtered_pool = []
 if "reject_count" not in st.session_state:
     st.session_state.reject_count = 0
 if "del_generation" not in st.session_state:
@@ -64,6 +60,7 @@ with col_left:
             elif not st.session_state.animating:
                 st.session_state.reject_count = 0  # 正常點擊抽選時重置拒絕計數
                 st.session_state.prefetched_roast = ""  # 重置預取嘴砲
+                st.session_state.filtered_pool = list(st.session_state.restaurants)  # 重置篩選池
                 st.session_state.animating = True
 
     image_area = st.empty()
@@ -101,26 +98,56 @@ with col_left:
                     unsafe_allow_html=True,
                 )
             else:
-                # 正常顯示：把「吃...好嗎？」與「不要」按鈕放在 text_area 容器內
+                # 正常顯示：把「吃...好嗎？」與拒絕按鈕放在 text_area 容器內
                 with text_area.container():
+                    choice = st.session_state.last_choice
+                    rc = st.session_state.reject_count
+                    can_filter_dist = choice.get("distance") is not None
+                    can_filter_price = choice.get("price") is not None
+
+                    st.markdown(f"<p style='font-size:18px;font-weight:500;margin:0;padding-top:10px;'>吃 <b>{choice['name']}</b> 好嗎？</p>", unsafe_allow_html=True)
+
+                    # 拒絕按鈕灰色
                     st.markdown("""
                     <style>
-                    .result-text {
-                        font-size: 18px;
-                        font-weight: 500;
-                        margin: 0;
+                    button[data-testid="stBaseButton-tertiary"] {
+                        color: #999 !important;
                     }
                     </style>
                     """, unsafe_allow_html=True)
 
-                    res_col, btn_col_no = st.columns([3, 1])
-                    with res_col:
-                        st.markdown(f"<div style='height:10px'></div><p class='result-text'>吃 <b>{st.session_state.last_choice}</b> 好嗎？</p>", unsafe_allow_html=True)
-                    with btn_col_no:
-                        if st.button("不要", key=f"reject_btn_{st.session_state.del_generation}"):
+                    btn1, btn2, btn3, spacer = st.columns([1, 1, 1, 3])
+                    with btn1:
+                        if st.button("不要", key=f"reject_btn_{rc}", type="tertiary"):
                             st.session_state.reject_count += 1
                             if st.session_state.reject_count < 3:
                                 st.session_state.animating = True
+                            st.rerun()
+                    with btn2:
+                        if st.button("太遠", key=f"too_far_{rc}", disabled=not can_filter_dist, type="tertiary"):
+                            threshold = choice["distance"]
+                            st.session_state.filtered_pool = [
+                                r for r in st.session_state.filtered_pool
+                                if r.get("distance") is None or r["distance"] < threshold
+                            ]
+                            st.session_state.reject_count += 1
+                            if st.session_state.filtered_pool and st.session_state.reject_count < 3:
+                                st.session_state.animating = True
+                            elif not st.session_state.filtered_pool:
+                                st.warning("篩選後沒有餐廳了！")
+                            st.rerun()
+                    with btn3:
+                        if st.button("太貴", key=f"too_exp_{rc}", disabled=not can_filter_price, type="tertiary"):
+                            threshold = choice["price"]
+                            st.session_state.filtered_pool = [
+                                r for r in st.session_state.filtered_pool
+                                if r.get("price") is None or r["price"] < threshold
+                            ]
+                            st.session_state.reject_count += 1
+                            if st.session_state.filtered_pool and st.session_state.reject_count < 3:
+                                st.session_state.animating = True
+                            elif not st.session_state.filtered_pool:
+                                st.warning("篩選後沒有餐廳了！")
                             st.rerun()
 
 with col_right:
@@ -129,16 +156,30 @@ with col_right:
     def add_restaurant():
         name = st.session_state.restaurant_input
         if name:
-            # 儲存到 SQLite，若成功則重新載入列表並清空輸入框
-            added = db.add_restaurant(name)
+            # 取得距離和價格（空字串轉為 None）
+            dist_val = st.session_state.get("distance_input")
+            price_val = st.session_state.get("price_input")
+            distance = int(dist_val) if dist_val else None
+            price = int(price_val) if price_val else None
+
+            added = db.add_restaurant(name, distance=distance, price=price)
             if added:
                 st.session_state.restaurants = db.get_restaurants()
-                st.session_state.restaurant_input = ""  # callback 裡可以直接清空
+                st.session_state.restaurant_input = ""
+                st.session_state.distance_input = ""
+                st.session_state.price_input = ""
             else:
                 st.warning("重複了啦!!!")
 
     st.markdown("<p style='font-size:1.2rem;margin-bottom:2px;margin-top:0;'>餐廳名稱</p>", unsafe_allow_html=True)
-    st.text_input("", key="restaurant_input", label_visibility="hidden")
+    st.text_input("餐廳名稱", key="restaurant_input", label_visibility="collapsed")
+
+    dist_col, price_col = st.columns(2)
+    with dist_col:
+        st.text_input("距離（公尺）", key="distance_input", label_visibility="visible")
+    with price_col:
+        st.text_input("價格（元）", key="price_input", label_visibility="visible")
+
     st.button("加入", on_click=add_restaurant)
 
     st.markdown(
@@ -169,15 +210,22 @@ with col_right:
         for idx, r in enumerate(st.session_state.restaurants, 1):
             item_col, btn_col = st.columns([1, 0.12])
             with item_col:
+                # 組合顯示：名稱 + 距離/價格
+                details = []
+                if r.get("distance") is not None:
+                    details.append(f"{r['distance']}m")
+                if r.get("price") is not None:
+                    details.append(f"${r['price']}")
+                detail_str = f" <span style='color:#888;font-size:12px;'>（{'／'.join(details)}）</span>" if details else ""
                 st.markdown(
                     f"<div style='background:#f0f2f6;padding:8px 12px;border-radius:8px;"
                     f"border-left:4px solid #4CAF50;font-size:14px;line-height:1.4;'>"
-                    f"{idx}. {r}</div>",
+                    f"{idx}. {r['name']}{detail_str}</div>",
                     unsafe_allow_html=True,
                 )
             with btn_col:
                 if st.button("❌", key=f"del_{st.session_state.del_generation}_{idx}"):
-                    db.remove_restaurant(r)
+                    db.remove_restaurant(r["name"])
                     st.session_state.restaurants = db.get_restaurants()
                     st.session_state.del_generation += 1
                     st.rerun()
@@ -197,10 +245,13 @@ if st.session_state.animating:
     interval = 0.12
     iterations = max(1, int(duration / interval))
 
+    # 使用篩選後的池子抽選（若為空則用全部餐廳）
+    pool = st.session_state.filtered_pool or st.session_state.restaurants
+
     for _ in range(iterations):
-        temp_choice = random.choice(st.session_state.restaurants)
+        temp_choice = random.choice(pool)
         text_area.markdown(
-            f"<div style='text-align:center; margin-top:12px; font-size:22px; font-weight:600;'>{temp_choice}</div>",
+            f"<div style='text-align:center; margin-top:12px; font-size:22px; font-weight:600;'>{temp_choice['name']}</div>",
             unsafe_allow_html=True,
         )
         time.sleep(interval)
@@ -212,7 +263,7 @@ if st.session_state.animating:
         except Exception:
             pass
 
-    final_choice = random.choice(st.session_state.restaurants)
+    final_choice = random.choice(pool)
     st.session_state.last_choice = final_choice
 
     # 動畫結束，回到靜態圖並顯示結果

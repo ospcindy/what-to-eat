@@ -77,10 +77,15 @@ def get_restaurants(db_path: Optional[Path] = None):
     return _restaurants.get_restaurants(db_path=db_path)
 
 
-def add_restaurant(name: str, db_path: Optional[Path] = None) -> bool:
+def add_restaurant(
+    name: str,
+    distance: Optional[int] = None,
+    price: Optional[int] = None,
+    db_path: Optional[Path] = None,
+) -> bool:
     from .models import restaurants as _restaurants
 
-    return _restaurants.add_restaurant(name, db_path=db_path)
+    return _restaurants.add_restaurant(name, distance=distance, price=price, db_path=db_path)
 
 
 def remove_restaurant(name: str, db_path: Optional[Path] = None) -> bool:
